@@ -1,0 +1,117 @@
+# Importing required libraries
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    roc_curve,
+    auc
+)
+
+# Step 1: Load Dataset
+df = pd.read_csv('dataset.csv')  # Replace with your dataset path
+
+# Step 2: Data Preprocessing
+# Handle missing values
+imputer = SimpleImputer(strategy='mean')
+if 'TotalCharges' in df.columns:
+    df['TotalCharges'] = imputer.fit_transform(df[['TotalCharges']])
+
+# Drop duplicates
+df.drop_duplicates(inplace=True)
+
+# Encode categorical variables
+label_cols = df.select_dtypes(include=['object']).columns
+label_encoder = LabelEncoder()
+for col in label_cols:
+    if df[col].nunique() == 2:  # Binary encoding
+        df[col] = label_encoder.fit_transform(df[col])
+    else:
+        df = pd.get_dummies(df, columns=[col])
+
+# Feature Scaling
+scaler = StandardScaler()
+numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns.drop('Churn', errors='ignore')
+df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+
+# Step 3: Exploratory Data Analysis (EDA)
+# Univariate: Churn Distribution
+sns.countplot(x='Churn', data=df)
+plt.title('Churn Distribution')
+plt.show()
+
+# Bivariate: MonthlyCharges vs Churn (if exists)
+if 'MonthlyCharges' in df.columns:
+    sns.boxplot(x='Churn', y='MonthlyCharges', data=df)
+    plt.title('Monthly Charges vs Churn')
+    plt.show()
+
+# Correlation Heatmap
+corr = df.corr()
+plt.figure(figsize=(12, 8))
+sns.heatmap(corr, annot=False, cmap='coolwarm')
+plt.title('Correlation Matrix')
+plt.show()
+
+# Step 4: Feature Engineering
+if all(col in df.columns for col in ['TotalCharges', 'tenure']):
+    df['AvgChargesPerMonth'] = df['TotalCharges'] / (df['tenure'] + 1)
+
+    # Binning tenure
+    df['TenureGroup'] = pd.cut(df['tenure'],
+                               bins=[0, 12, 24, 36, 48, 60, 72],
+                               labels=['0-12', '13-24', '25-36', '37-48', '49-60', '61-72'])
+
+    df = pd.get_dummies(df, columns=['TenureGroup'], drop_first=True)
+
+# Step 5: Model Building
+# Feature and target split
+X = df.drop('Churn', axis=1)
+y = df['Churn']
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+
+# Logistic Regression
+lr = LogisticRegression(max_iter=1000)
+lr.fit(X_train, y_train)
+y_pred_lr = lr.predict(X_test)
+
+# Random Forest
+rf = RandomForestClassifier(n_estimators=100, random_state=42)
+rf.fit(X_train, y_train)
+y_pred_rf = rf.predict(X_test)
+
+# Step 6: Model Evaluation
+print("Logistic Regression Results:\n", classification_report(y_test, y_pred_lr))
+print("Random Forest Results:\n", classification_report(y_test, y_pred_rf))
+
+# Confusion Matrix for Random Forest
+cm = confusion_matrix(y_test, y_pred_rf)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=rf.classes_)
+disp.plot()
+plt.title("Confusion Matrix - Random Forest")
+plt.show()
+
+# ROC Curve for Random Forest
+y_proba_rf = rf.predict_proba(X_test)[:, 1]
+fpr, tpr, _ = roc_curve(y_test, y_proba_rf)
+roc_auc = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, label=f'ROC curve (area = {roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], 'r--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve - Random Forest')
+plt.legend(loc='lower right')
+plt.show()
